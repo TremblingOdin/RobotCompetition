@@ -7,12 +7,28 @@
 
 #include <avr/io.h>
 
-//##################################################################################
-//################################ Drive Module ####################################
-//##################################################################################
+#define READ 1
+#define WRITE 0
+#define SAD 0b00110000;
+
+#define STATUS_REG 0b01001110
+#define OUT_X_L 0b01010000
+#define OUT_X_H 0b01010010
+#define OUT_Y_L 0b01010100
+#define OUT_Y_H 0b01010110
 
 static int prescaler=8;
 static int counterValue_PWM=255;
+
+static char baseX = 0;
+static char ongoingX = 0;
+static char ongoingY = 0;
+
+static float dutyc_f = 0.8;
+
+//##################################################################################
+//################################ Drive Module ####################################
+//##################################################################################
 
 void initPWM(int prescaler_value, int PWMbit_value){			//(checked) running in application
 	//setup of PWM parameters ; Prescaler: 1,8,64,256,1024 possible
@@ -209,9 +225,123 @@ void StopEngines(void){
 //################################ Acceleration Module #############################
 //##################################################################################
 
-//Reads the acceleration at the moment then calls the reverse/turn function if it has slowed down for whatever reason by hitting something, else drive
-int AccelerationRead(void) {
+//TWCR TWINT TWEN and TWSTA might not be the right variable  names, need  to double check
+int Acknowledge(void) {
+	return !(TWCR & (1 << TWINT));
+}
 
+//Sends Start Condition to I2C
+void SendStart(void) {
+	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
+	while (Acknowledge());
+}
+
+void AccelerometerRegisterRequest(char regAddress, int read) {
+	regAddress |= (read);
+	TWDR = regAddress;
+	TWCR = (1 << TWINT) | (1 << TWEN);
+	while (Acknowledge());
+}
+
+void SendSubAddress(char subAddress) {
+	//SubAddresses do not need the read/write LSB
+	//A 7 bit address is expected so shifting the whole address to the right is necessary
+	subAddress = (subAddress >> 1);
+	TWDR = subAddress;
+	while (Acknowledge());
+}
+
+void SendNMAK(void) {
+	TWDR = 0b00000001;
+	TWCR = (1 << TWINT) | (1 << TWEN);
+}
+
+void SendStop(void) {
+	TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
+}
+
+char ReadRequest(char readReg) {
+	char data;
+	SendStart();
+	AccelerometerRegisterRequest(SAD, WRITE);
+	SendSubAddress(readReg);
+	SendStart();
+	AccelerometerRegisterRequest(SAD, READ);
+	data = TWDR;
+	SendNMAK();
+	SendStop();
+
+	return data;
+}
+
+//Reads and returns the slope of the provided axis
+char FindSlope(char axis) {
+	char x, y;
+	if (axis == 'x') {
+		x = ReadRequest(OUT_X_X);
+
+		return x;
+	}
+	else if (axis == 'y') {
+		y = ReadRequest(OUT_Y_X);
+
+		return y;
+	}
+}
+
+//Checks Status of the X or Y acceleration
+void CheckStop(void) {
+	char xh, yh;
+
+	xh = ReadRequest(OUT_X_H);
+
+	yh = ReadRequest(OUT_Y_H);
+
+	if (xh < ongoingX - 15) {
+		Reverse(dutyc_b, counterValue_PWM);
+		if (yh < 0) {
+			Turn(0, dutyc_f, counterValue_PWM);
+		}
+		else {
+			Turn(1, dutyc_f, counterValue_PWM);
+		}
+	}
+
+	if (yh < ongoingY - 15 || yh > ongoingY + 15) {
+		Reverse(dutyc_b, counterValue_PWM);
+		if (yh < 0) {
+			Turn(0, dutyc_f, counterValue_PWM);
+		}
+		else {
+			Turn(1, dutyc_f, counterValue_PWM);
+		}
+	}
+}
+
+void AccelerationRead() {
+	char status;
+
+	status = ReadRequest(STATUS_REG);
+
+	if (!((status & 0b00000011) == 0)) {
+		CheckStop();
+	}
+
+	if (!((status & 0b00000010) == 0)) {
+		onGoingY = FindSlope('y');
+	}
+
+	if (!((status & 0b00000001) == 0)) {
+		onGoingX = FindSlope('x');
+		if ((ongoingX & 0b10000000) != 0) {
+			if ((ongoingY & 0b10000000) != 0) {
+				Turn(1, dutyc_f, counterValue_PWM);
+			}
+			else {
+				Turn(0, dutyc_f, counterValue_PWM);
+			}
+		}
+	}
 }
 
 void Delay(int time) {
@@ -336,17 +466,18 @@ int main(void)
 	float dutyc_f=0.32;							//slower forward duty cycle
 	//float dutyc_b=0.21;						//slower backward dutycycle
 
-//################## Input and Output Setups rough draft ###########################
-	PINC &= ~((1 << PC2) | (1 << PC3) | (1 << PC1)); //
-	PIND &= 0;
-	PINB &= 0;
+	//######################## Accelerometer config ################################
+	PIND |= (1 << PD0) | (1 << PD1);
+	PINC |= (1 << PC4) | (1 << PC5);
+
+	baseX = FindSlope('x');
 
     while (1)
     {
 		//######################## Example Drive ###################################
+		AccelerationRead();
 		Drive(dutyc_f,counterValue_PWM);
 	    	LightRead();
-		AccelerationRead();
 		Delay(0);
     }
 
