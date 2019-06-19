@@ -7,15 +7,36 @@
 
 #include <avr/io.h>
 
+#define READ 1
+#define WRITE 0
+#define SAD 0b00110000
+
+#define STATUS_REG 0b01001110
+#define OUT_X_L 0b01010000
+#define OUT_X_H 0b01010010
+#define OUT_Y_L 0b01010100
+#define OUT_Y_H 0b01010110
+
+#define FOSC 8000000							// Clock Speed
+#define BAUD 4800
+#define MYUBRR FOSC/(16*BAUD) - 1				// calculating UBRR
+
 // Definitions are in the Modules for better understanding
 // if they need to be on top, you can change it
+
+static int prescaler = 8;
+static int counterValue_PWM = 255;
+
+static char baseX = 0;
+static char ongoingX = 0;
+static char ongoingY = 0;
+
+static float dutyc_f = 0.8;
+static float dutyc_b = 0.5;
 
 //##################################################################################
 //################################ Drive Module ####################################
 //##################################################################################
-
-static int prescaler=8;
-static int counterValue_PWM=255;
 
 void initPWM(int prescaler_value, int PWMbit_value){			//(checked) running in application
 	//setup of PWM parameters ; Prescaler: 1,8,64,256,1024 possible
@@ -212,29 +233,6 @@ void StopEngines(void){
 //################################ Acceleration Module #############################
 //##################################################################################
 
-/*
-
-#define READ 1
-#define WRITE 0
-#define SAD 0b00110000;
-
-#define STATUS_REG 0b01001110
-#define OUT_X_L 0b01010000
-#define OUT_X_H 0b01010010
-#define OUT_Y_L 0b01010100
-#define OUT_Y_H 0b01010110
-
-static int prescaler=8;
-static int counterValue_PWM=255;
-
-static char baseX = 0;
-static char ongoingX = 0;
-static char ongoingY = 0;
-
-static float dutyc_f = 0.8;
-
-
-
 //TWCR TWINT TWEN and TWSTA might not be the right variable  names, need  to double check
 int Acknowledge(void) {
 	return !(TWCR & (1 << TWINT));
@@ -288,12 +286,12 @@ char ReadRequest(char readReg) {
 char FindSlope(char axis) {
 	char x, y;
 	if (axis == 'x') {
-		x = ReadRequest(OUT_X_X);
+		x = ReadRequest(OUT_X_H);
 
 		return x;
 	}
 	else if (axis == 'y') {
-		y = ReadRequest(OUT_Y_X);
+		y = ReadRequest(OUT_Y_H);
 
 		return y;
 	}
@@ -338,11 +336,11 @@ void AccelerationRead() {
 	}
 
 	if (!((status & 0b00000010) == 0)) {
-		onGoingY = FindSlope('y');
+		ongoingY = FindSlope('y');
 	}
 
 	if (!((status & 0b00000001) == 0)) {
-		onGoingX = FindSlope('x');
+		ongoingX = FindSlope('x');
 		if ((ongoingX & 0b10000000) != 0) {
 			if ((ongoingY & 0b10000000) != 0) {
 				Turn(1, dutyc_f, counterValue_PWM);
@@ -358,7 +356,6 @@ void Delay(int time) {
 
 }
 
-*/
 
 //##################################################################################
 //################################ Light Sensor Module #############################
@@ -425,10 +422,6 @@ int LightRead(void) {
 //################################ Bluetooth Module ################################
 //##################################################################################
 
-
-#define FOSC 8000000							// Clock Speed
-#define BAUD 4800
-#define MYUBRR FOSC/(16*BAUD) - 1				// calculating UBRR
 
 void USART_Init( unsigned int ubrr)
 {
