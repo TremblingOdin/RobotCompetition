@@ -7,6 +7,8 @@
 
 #include <avr/io.h>
 
+/*
+
 #define READ 1
 #define WRITE 0
 #define SAD 0b00110000;
@@ -26,9 +28,14 @@ static char ongoingY = 0;
 
 static float dutyc_f = 0.8;
 
+*/
+
 //##################################################################################
 //################################ Drive Module ####################################
 //##################################################################################
+
+static int prescaler=8;
+static int counterValue_PWM=255;
 
 void initPWM(int prescaler_value, int PWMbit_value){			//(checked) running in application
 	//setup of PWM parameters ; Prescaler: 1,8,64,256,1024 possible
@@ -225,6 +232,8 @@ void StopEngines(void){
 //################################ Acceleration Module #############################
 //##################################################################################
 
+/*
+
 //TWCR TWINT TWEN and TWSTA might not be the right variable  names, need  to double check
 int Acknowledge(void) {
 	return !(TWCR & (1 << TWINT));
@@ -348,6 +357,7 @@ void Delay(int time) {
 
 }
 
+*/
 
 //##################################################################################
 //################################ Light Sensor Module #############################
@@ -379,30 +389,15 @@ void USART_Init( unsigned int ubrr)
 	//####################### Data transfer config  ################################
 	UCSRA = 0;									// status byte
 	UCSRB = (1<<RXEN)|(1<<TXEN);				// Enable receiver and transmitter
-	UCSRC = (1<<URSEL)|(1<<USBS)|(3<<UCSZ0);	// Set frame format: 8data, 2stop bit
+	UCSRC = (1<<URSEL)|(1<<UCSZ0)|(1<<UCSZ1);	// Set frame format: 8data, 1stop bit
 
-	// ################ PIN config ##########################################
-	//  DDRD |= (1<<PD4)|(1<<PD5)|(1<<PD6);
-	//  DDRB |= (1<<PB4)|(1<<PB5)|(1<<PB1)|(1<<PB2);
+	//################ PIN config ##################################################
+	//DDRD &= ~(1<<PD0);
+	//DDRD |= (1<<PD1);
+
 }
 
-//################################ Read Analog ################################################################
-
-unsigned char Read_Analog( char Kanal)
-{
-	char zwischenwert = 0;
-	ADMUX = ADMUX | (Kanal); // wählt den entsprechenden Analogen Eingang aus, da Binäre Codierung, entspricht z.B. eine 3 den entsprechenden MUX bits im Register
-	ADCSRA = ADCSRA | (1<<ADSC); // starten der Wandlung
-	while ((ADCSRA & (1<<ADSC)))	// Wartet auf das Beenden der Wandlung
-	{
-	}
-	zwischenwert= ADCH;			// da eine 8 Bit Wert gefordert und das Register Linksseitig beschrieben wird reicht es das H Register auszulesen
-	ADMUX = 0b01100000;			// MUX Register werden wieder zurückgesetzt damit es nicht zu Problemen bei der Auswahl am Anfang dieser Funktion kommen kann
-	return zwischenwert;		// gibt den glesenen Analogwert zurück
-}
-//################################ sending receiving #####################################################################
-
-// ############################## sending ############################################
+// ############################## sending ##########################################
 
 void USART_Transmit( unsigned char data )
 {
@@ -411,43 +406,44 @@ void USART_Transmit( unsigned char data )
 	UDR = data;									// Put data into buffer, sends the data
 }
 
- // ############################## receiving ############################################
+ // ######################### receiving ############################################
 
  unsigned char Recive(void)
  {
-	 while (!(UCSRA & (1<< RXC)))   // ist das 7te bit im UCSRA gesetzt (RXC Flag) liegen noch ungelesenen Daten im Register
-	 {							   // solange dies nicht der Fall ist verbleibt das Programm in der Schleife und wartet
-	 }							   // auf die neuen Daten
-	 return UDR;					   // gibt die daten aus dem UDR heraus
+	 while (!(UCSRA & (1<< RXC)))
+	 {
+	 }
+	 return UDR;
  }
 
- // ############################## sending ASCII ############################################
+ // ####################### sending ASCII ##########################################
 
  void Sende_In_ASCII (unsigned char Analogwert)
  {
-	 unsigned char umgewandelte_Zahl[3]; // 3 damit noch eine Lücke gesendet wird
+	 unsigned char umgewandelte_Zahl[3];		// 3 damit noch eine Lücke gesendet wird
 	 umgewandelte_Zahl[3]= ' ';
 	 unsigned char zahl = Analogwert;
 
 	 // transfer to ASCII
-	 umgewandelte_Zahl[2] = (zahl % 10) + 48 ;   // 123 / 10 gibt hier den Rest 3    // +48 da in ASCII die 48 die 0 ist
+	 umgewandelte_Zahl[2] = (zahl % 10) + 48 ;  // 123 / 10 gibt hier den Rest 3
 	 zahl = zahl / 10;					        // ganzzahlige division 123 / 10 = 12
-	 umgewandelte_Zahl[1] =( zahl % 10) + 48 ;   // 12 / 10 gibt hier den Rest 2
+	 umgewandelte_Zahl[1] =( zahl % 10) + 48 ;  // 12 / 10 gibt hier den Rest 2
 	 zahl = zahl / 10;							// 12 /10 = 1
 	 umgewandelte_Zahl[0] = zahl + 48 ;
 
 
 	 // sending ASCII letters
-	 UCSRB = (1<<TXEN);	// Senden ein Empfangen aus
+	 UCSRB = (1<<TXEN);							// sending on receiving off
 	 int i = 0;
 
-	 for ( i = 0; i <= 3; i++)
+	 for ( i = 0; i < 3; i++)
 	 {
 		 USART_Transmit (umgewandelte_Zahl[i]);
-		 while (!(UCSRA & (1<< TXC)))		// Wartet auf Ende der Übertragung
+		 while (!(UCSRA & (1<< TXC)))			// wait until sending ends
 		 {
 		 }
 		 UCSRA = UCSRA | (1<< TXC);
+		 i++;
 	 }
 
  }
@@ -463,8 +459,20 @@ int main(void)
 	DDRB |= (1<<PB1)|(1<<PB2);
 	DDRD |= (1<<PD6)|(1<<PD7);
 	initPWM(prescaler,counterValue_PWM);
-	float dutyc_f=0.32;							//slower forward duty cycle
-	//float dutyc_b=0.21;						//slower backward dutycycle
+	USART_Init(MYUBRR);
+	//float dutyc_f=0.32;						// slower forward duty cycle
+	//float dutyc_b=0.21;						// slower backward dutycycle
+
+
+	//################## Input and Output Setups rough draft ###########################
+	PINC &= ~((1 << PC2) | (1 << PC3) | (1 << PC1)); //
+	PIND &= 0;
+	PINB &= 0;
+	UCSRB &= ~(1<<RXEN);
+	UCSRB |= (1<<TXEN);
+	unsigned char test=66;
+
+	/*
 
 	//######################## Accelerometer config ################################
 	PIND |= (1 << PD0) | (1 << PD1);
@@ -472,15 +480,21 @@ int main(void)
 
 	baseX = FindSlope('x');
 
+	*/
+
     while (1)
     {
-		//######################## Example Drive ###################################
-		AccelerationRead();
-		Drive(dutyc_f,counterValue_PWM);
-	    	LightRead();
-		Delay(0);
-    }
+	//######################## Example Drive ###################################
 
-	USART_Init ( MYUBRR );						// Bluetooth Module
+	/*
+	Drive(dutyc_f,counterValue_PWM);
+	LightRead();
+	AccelerationRead();
+	Delay(0);
+	*/
+
+	Sende_In_ASCII(test);
+
+	}
+
 }
-
