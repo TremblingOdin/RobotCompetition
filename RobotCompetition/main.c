@@ -19,7 +19,7 @@
 
 #define FOSC 8000000							// Clock Speed
 #define BAUD 4800
-#define MYUBRR FOSC/(16*BAUD) - 1				// calculating UBRR
+
 
 // Definitions are in the Modules for better understanding
 // if they need to be on top, you can change it
@@ -31,8 +31,89 @@ static char baseX = 0;
 static char ongoingX = 0;
 static char ongoingY = 0;
 
-static float dutyc_f = 0.8;
+static float dutyc_f = 0.5;
 static float dutyc_b = 0.5;
+
+//Which side is the bot starting on?
+const int side = 0;
+
+//General Purpose Function
+void Delay(int time) {
+	int i,j;
+	for(j = 0;  j < time;  j++){
+		for(i = 0; i < 5000; i++);
+	}
+}
+
+
+//##################################################################################
+//################################ Bluetooth Module ################################
+//##################################################################################
+
+
+void USART_Init( unsigned int ubrr)
+{
+	//####################### Set baud rate ########################################
+	UBRRH = (unsigned char)(ubrr>>8);	// set baud rate
+	UBRRL = (unsigned char)ubrr;
+
+	//####################### Data transfer config  ################################
+	UCSRA = 0;	// status byte
+	UCSRB = (1<<RXEN)|(1<<TXEN);	// Enable receiver and transmitter
+	UCSRC = (1<<URSEL)|(1<<UCSZ0)|(1<<UCSZ1);	// Set frame format: 8data, 1stop bit
+}
+
+// ############################## sending ##########################################
+
+void USART_Transmit( unsigned char data )
+{
+	while ( !( UCSRA & (1<<UDRE)) );	// Wait for empty transmit buffer
+	UDR = data;	// Put data into buffer, sends the data
+	while (!(UCSRA & (1<< TXC)))	// Wartet auf Ende der Übertragung
+	{
+	}
+	UCSRA = UCSRA | (1<< TXC);
+}
+
+// ######################### receiving ############################################
+
+unsigned char Recive(void)
+{
+	while (!(UCSRA & (1<< RXC)))
+	{
+	}
+	return UDR;
+}
+
+// ####################### sending ASCII ##########################################
+
+void Sende_In_ASCII (unsigned char Analogwert)
+{
+	unsigned char value_Array[3];	// 3 damit noch eine Lücke gesendet wird
+
+	unsigned char hundert = Analogwert/100;
+	Analogwert -= hundert*100;
+
+	unsigned char zehner = Analogwert/10;
+	Analogwert -= zehner*10;
+
+	unsigned char einser = Analogwert;
+
+	value_Array[0]= (hundert+48);
+	value_Array[1]= (zehner+48);
+	value_Array[2]= (einser+48);
+
+	// sending ASCII letters
+
+	int i = 0;
+
+	for ( i = 0; i < 3; i++)
+	{
+		USART_Transmit (value_Array[i]);
+		i++;
+	}
+
+}
 
 //##################################################################################
 //################################ Drive Module ####################################
@@ -228,7 +309,6 @@ void StopEngines(void){
 	PORTD &= ~((1<<PD6)|(1<<PD7));
 }
 
-
 //##################################################################################
 //################################ Acceleration Module #############################
 //##################################################################################
@@ -239,9 +319,11 @@ int Acknowledge(void) {
 }
 
 //Sends Start Condition to I2C
-void SendStart(void) {
+void SendStart(int repeated) {
 	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
 	while (Acknowledge());
+	
+	USART_Transmit((TWSR & 0xF8));	
 }
 
 void AccelerometerRegisterRequest(char regAddress, int read) {
@@ -249,6 +331,12 @@ void AccelerometerRegisterRequest(char regAddress, int read) {
 	TWDR = regAddress;
 	TWCR = (1 << TWINT) | (1 << TWEN);
 	while (Acknowledge());
+	if(read) {
+		
+	} else {
+		
+	}
+	USART_Transmit(TWSR & 0xF8);
 }
 
 void SendSubAddress(char subAddress) {
@@ -256,30 +344,35 @@ void SendSubAddress(char subAddress) {
 	//A 7 bit address is expected so shifting the whole address to the right is necessary
 	subAddress = (subAddress >> 1);
 	TWDR = subAddress;
-	while (Acknowledge());
-}
-
-void SendNMAK(void) {
-	TWDR = 0b00000001;
 	TWCR = (1 << TWINT) | (1 << TWEN);
+	while (Acknowledge());
+	
+	USART_Transmit(TWSR & 0xF8);
 }
 
 void SendStop(void) {
 	TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
+	while(TWCR & (1<<TWINT));
+	TWCR &= ~(1<<TWSTO);
+	
+	USART_Transmit(TWSR & 0xF8);
 }
 
 char ReadRequest(char readReg) {
-	char data;
-	SendStart();
+	//USART_Transmit('A');
+	SendStart(0);
+	//USART_Transmit('B');
 	AccelerometerRegisterRequest(SAD, WRITE);
+	//USART_Transmit('C');
 	SendSubAddress(readReg);
-	SendStart();
+	//USART_Transmit('D');
+	SendStart(1);
+	//USART_Transmit('E');
 	AccelerometerRegisterRequest(SAD, READ);
-	data = TWDR;
-	SendNMAK();
+	//USART_Transmit('F');
 	SendStop();
 
-	return data;
+	return TWDR;
 }
 
 //Reads and returns the slope of the provided axis
@@ -287,13 +380,16 @@ char FindSlope(char axis) {
 	char x, y;
 	if (axis == 'x') {
 		x = ReadRequest(OUT_X_H);
-
+		
 		return x;
 	}
 	else if (axis == 'y') {
 		y = ReadRequest(OUT_Y_H);
 
 		return y;
+	}
+	else {
+		return 0;
 	}
 }
 
@@ -330,32 +426,36 @@ void AccelerationRead() {
 	char status;
 
 	status = ReadRequest(STATUS_REG);
-
+			
+	//If there is a difference in the acceleration of Y or X check if stopped/bumped
 	if (!((status & 0b00000011) == 0)) {
 		CheckStop();
 	}
 
+	//If Y returns a change, find the y slope
 	if (!((status & 0b00000010) == 0)) {
 		ongoingY = FindSlope('y');
 	}
 
+	//If X returns a change find the X slope and the direction in Y we need to change
 	if (!((status & 0b00000001) == 0)) {
 		ongoingX = FindSlope('x');
-		if ((ongoingX & 0b10000000) != 0) {
+		//Is X negative?
+		if ((ongoingX & 0b10000000) == 0 && ongoingX > 0b00000000) {
+			//Is Y negative? turn right
 			if ((ongoingY & 0b10000000) != 0) {
 				Turn(1, dutyc_f, counterValue_PWM);
 			}
+			//Is X negative turn left
 			else {
 				Turn(0, dutyc_f, counterValue_PWM);
 			}
+			//Is X going downhill?
+		} else if (ongoingX < 0b0000000) {
+			Turn(side, dutyc_f, counterValue_PWM);
 		}
 	}
 }
-
-void Delay(int time) {
-
-}
-
 
 //##################################################################################
 //################################ Light Sensor Module #############################
@@ -419,128 +519,45 @@ int LightRead(void) {
 
 
 //##################################################################################
-//################################ Bluetooth Module ################################
-//##################################################################################
-
-
-void USART_Init( unsigned int ubrr)
-{
-	//####################### Set baud rate ########################################
-	UBRRH = (unsigned char)(ubrr>>8);
-	UBRRL = (unsigned char)ubrr;
-
-	//####################### Data transfer config  ################################
-	UCSRA = 0;									// status byte
-	UCSRB = (1<<RXEN)|(1<<TXEN);				// Enable receiver and transmitter
-	UCSRC = (1<<URSEL)|(1<<UCSZ0)|(1<<UCSZ1);	// Set frame format: 8data, 1stop bit
-
-	//##################### PIN config #############################################
-	//DDRD &= ~(1<<PD0);
-	//DDRD |= (1<<PD1);
-
-}
-
-// ############################## sending ##########################################
-
-void USART_Transmit( unsigned char data )
-{
-	while ( !( UCSRA & (1<<UDRE)) )				// Wait for empty transmit buffer
-	;
-	UDR = data;									// Put data into buffer, sends the data
-}
-
- // ######################### receiving ############################################
-
- unsigned char Recive(void)
- {
-	 while (!(UCSRA & (1<< RXC)))
-	 {
-	 }
-	 return UDR;
- }
-
- // ####################### sending ASCII ##########################################
-
- void Sende_In_ASCII (unsigned char Analogwert)
- {
-	 unsigned char umgewandelte_Zahl[3];		// 3 damit noch eine Lücke gesendet wird
-	 umgewandelte_Zahl[3]= ' ';
-	 unsigned char zahl = Analogwert;
-
-	 // transfer to ASCII
-	 umgewandelte_Zahl[2] = (zahl % 10) + 48 ;  // 123 / 10 gibt hier den Rest 3
-	 zahl = zahl / 10;					        // ganzzahlige division 123 / 10 = 12
-	 umgewandelte_Zahl[1] =( zahl % 10) + 48 ;  // 12 / 10 gibt hier den Rest 2
-	 zahl = zahl / 10;							// 12 /10 = 1
-	 umgewandelte_Zahl[0] = zahl + 48 ;
-
-
-	 // sending ASCII letters
-	 UCSRB = (1<<TXEN);							// sending on receiving off
-	 int i = 0;
-
-	 for ( i = 0; i < 3; i++)
-	 {
-		 USART_Transmit (umgewandelte_Zahl[i]);
-		 while (!(UCSRA & (1<< TXC)))			// wait until sending ends
-		 {
-		 }
-		 UCSRA = UCSRA | (1<< TXC);
-		 i++;
-	 }
-
- }
-
-
-//##################################################################################
 //################################ Main ############################################
 //##################################################################################
 
 int main(void)
 {
-	//######################## IO config engine ####################################
 	DDRB |= (1<<PB1)|(1<<PB2);
 	DDRD |= (1<<PD6)|(1<<PD7);
+
+	DDRD &= ~(1<<PD0);
+	DDRD |= (1<<PD1);
+
+	USART_Init (103);
+	unsigned char test_value='A';
+
+
 	initPWM(prescaler,counterValue_PWM);
-	USART_Init(MYUBRR);
-	//float dutyc_f=0.32;						// slower forward duty cycle
-	//float dutyc_b=0.21;						// slower backward dutycycle
-
-
-	//################## Input and Output Setups rough draft ###########################
-	PINC &= ~((1 << PC2) | (1 << PC3) | (1 << PC1)); //
-	PIND &= 0;
-	PINB &= 0;
-	UCSRB &= ~(1<<RXEN);
-	UCSRB |= (1<<TXEN);
-	unsigned char test=66;
-
-	/*
 
 	//######################## Accelerometer config ################################
 	PIND |= (1 << PD0) | (1 << PD1);
 	PINC |= (1 << PC4) | (1 << PC5);
+	TWBR = 100;
 
+	USART_Transmit(ReadRequest(0x0F));
 	baseX = FindSlope('x');
 
-	*/
+	while (1)
+	{
+		//######################## Example Drive ###################################
 
-    while (1)
-    {
-	//######################## Example Drive ###################################
+		
+		//Drive(dutyc_f,counterValue_PWM);
 
-	/*
-	Drive(dutyc_f,counterValue_PWM);
+		//LightRead();
 
-	Delay(0);
-	*/
+		AccelerationRead();
 
-	//LightRead();
+		//USART_Transmit(test_value);
 
-	//AccelerationRead();
-
-	Sende_In_ASCII(test);
+		//for(volatile long t=100000;t>0;t--);
 
 	}
-
 }
