@@ -11,11 +11,9 @@
 #define WRITE 0
 #define SAD 0b00110000
 
-#define STATUS_REG 0b01001110
-#define OUT_X_L 0b01010000
-#define OUT_X_H 0b01010010
-#define OUT_Y_L 0b01010100
-#define OUT_Y_H 0b01010110
+#define STATUS_REG 0x27
+#define OUT_X_H 0x29
+#define OUT_Y_H 0x2B
 
 #define FOSC 8000000							// Clock Speed
 #define BAUD 4800
@@ -323,56 +321,65 @@ void SendStart(int repeated) {
 	TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
 	while (Acknowledge());
 	
-	USART_Transmit((TWSR & 0xF8));	
+//	USART_Transmit((TWSR & 0xF8));	
 }
 
-void AccelerometerRegisterRequest(char regAddress, int read) {
-	regAddress |= (read);
-	TWDR = regAddress;
-	TWCR = (1 << TWINT) | (1 << TWEN);
-	while (Acknowledge());
-	if(read) {
-		
-	} else {
-		
-	}
-	USART_Transmit(TWSR & 0xF8);
-}
-
-void SendSubAddress(char subAddress) {
-	//SubAddresses do not need the read/write LSB
-	//A 7 bit address is expected so shifting the whole address to the right is necessary
-	subAddress = (subAddress >> 1);
-	TWDR = subAddress;
+//Request for the I2C Device to be read or written to
+void I2CRequest(char i2cAddress, int read) {
+	i2cAddress |= (read);
+	TWDR = i2cAddress;
 	TWCR = (1 << TWINT) | (1 << TWEN);
 	while (Acknowledge());
 	
-	USART_Transmit(TWSR & 0xF8);
+	if(read) {
+		TWCR = (1 << TWINT) | (1 << TWEN);
+		while(Acknowledge());
+	}
+		
+//	USART_Transmit(TWSR & 0xF8);
 }
 
+//Writes data to the TWDR then sends and interrupt, can be used for regular data or to state desired sub registers
+void SendWrite(char data) {
+	TWDR = data;
+	TWCR = (1 << TWINT) | (1 << TWEN);
+	while (Acknowledge());
+	
+//	USART_Transmit(TWSR & 0xF8);
+}
+
+//Sends Stop command
 void SendStop(void) {
 	TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
-	while(TWCR & (1<<TWINT));
-	TWCR &= ~(1<<TWSTO);
-	
-	USART_Transmit(TWSR & 0xF8);
+	while(TWCR & (1<<TWSTO));
 }
 
+//Read from I2C register
 char ReadRequest(char readReg) {
 	//USART_Transmit('A');
 	SendStart(0);
 	//USART_Transmit('B');
-	AccelerometerRegisterRequest(SAD, WRITE);
+	I2CRequest(SAD, WRITE);
 	//USART_Transmit('C');
-	SendSubAddress(readReg);
+	SendWrite(readReg);
 	//USART_Transmit('D');
 	SendStart(1);
 	//USART_Transmit('E');
-	AccelerometerRegisterRequest(SAD, READ);
+	I2CRequest(SAD, READ);
 	//USART_Transmit('F');
 	SendStop();
+	//USART_Transmit(TWDR);
 
 	return TWDR;
+}
+
+//Write to I2C Register
+void WriteRequest(char writeReg, char data) {
+	SendStart(0);
+	I2CRequest(SAD, WRITE);
+	SendWrite(writeReg);
+	SendWrite(data);
+	SendStop();
 }
 
 //Reads and returns the slope of the provided axis
@@ -426,7 +433,8 @@ void AccelerationRead() {
 	char status;
 
 	status = ReadRequest(STATUS_REG);
-			
+	USART_Transmit(status);
+	
 	//If there is a difference in the acceleration of Y or X check if stopped/bumped
 	if (!((status & 0b00000011) == 0)) {
 		CheckStop();
@@ -541,15 +549,22 @@ int main(void)
 	PINC |= (1 << PC4) | (1 << PC5);
 	TWBR = 100;
 
-	USART_Transmit(ReadRequest(0x0F));
+	//CR1
+	WriteRequest(0x20, 0b11000111);
+	//CR2
+	WriteRequest(0x21, 0b00001100);
+	//CFG
+	WriteRequest(0x30, 0b11001010);
+	
 	baseX = FindSlope('x');
+	USART_Transmit(baseX);
 
 	while (1)
 	{
 		//######################## Example Drive ###################################
 
 		
-		//Drive(dutyc_f,counterValue_PWM);
+		Drive(dutyc_f,counterValue_PWM);
 
 		//LightRead();
 
