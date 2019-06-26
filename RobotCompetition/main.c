@@ -405,12 +405,12 @@ void CheckStop(void) {
 			Reverse(dutyc_b,counterValue_PWM);
 		}
 
-		if(yh & 0b11110000) {
-			for(i = 0; i < 5000; i++) {
+		if(yh & 0b11100000) {
+			for(i = 0; i < 2000; i++) {
 				Turn(1, dutyc_f, counterValue_PWM);
 			}
 		} else {
-			for(i = 0; i < 5000; i++) {
+			for(i = 0; i < 2000; i++) {
 				Turn(0, dutyc_f, counterValue_PWM);
 			}
 		}
@@ -452,25 +452,21 @@ void AccelerationRead() {
 
 
 char LDRleft(void)
-{	ADMUX = (1<<REFS0)|(1<<ADLAR)|(1<<MUX1);	// init analog V_cc with capacitor at AREF-Pin & ADC2 active
-	ADCSRA= (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADSC);	// enable A/D-converter
-	PORTD |= (1<<PC3);	// light left
+{	ADMUX = (1<<REFS0)|(1<<ADLAR)|(1<<MUX0)|(1<<MUX1);	// init analog V_cc with capacitor at AREF-Pin & ADC2 active
+	ADCSRA= (1<<ADEN)|(1<<ADPS1)|(1<<ADPS2)|(1<<ADSC);	// enable A/D-converter
 	
 	while((ADCSRA & (1<<ADSC)))	{	}	// wait for converter end
 	
-	USART_Transmit(ADCL);
-	return ADCH;
+	return ADCL;
 }
 
 char LDRright(void)
 {	ADMUX = (1<<REFS0)|(1<<ADLAR)|(1<<MUX1);	// init analog V_cc with capacitor at AREF-Pin & ADC2 active
-	ADCSRA= (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADSC);	// enable A/D-converter
-	PORTD |= (1<<PC2);	// light right
-	
+	ADCSRA= (1<<ADEN)|(1<<ADPS1)|(1<<ADPS2)|(1<<ADSC);	// enable A/D-converter
+		
 	while((ADCSRA & (1<<ADSC)))	{	}	// wait for converter end
 	
-	USART_Transmit(ADCL);
-	return ADCH;
+	return ADCL;
 }
 
 //##################################################################################
@@ -486,6 +482,7 @@ int main(void)
 	DDRD |= (1<<PD1);
 	
 	DDRC |= (1<<PC1);
+	DDRC &= ~((1<<PC2)|(1<<PC3));
 	PORTC |= (1<<PC1);
 
 	USART_Init (103);
@@ -512,33 +509,27 @@ int main(void)
 		//######################## Example Drive ###################################
 
 		
-		//Drive(dutyc_f,counterValue_PWM);
+		Drive(dutyc_f,counterValue_PWM);
 
-		//AccelerationRead();
+		AccelerationRead();
 
-
-		USART_Transmit('L');
-		USART_Transmit(LDRleft());
-		USART_Transmit('R');
-		USART_Transmit(LDRright());
-
-		/*if(LDRleft() < 0b0000001 && LDRright() < 0b00000001) {
+		if(LDRleft() < 0b0100001 && LDRright() < 0b01000001) {
 			for(i = 0; i < 5000; i++) {
 				Drive(dutyc_f, counterValue_PWM);
 			}
 			while(1) {
 				StopEngines();
 			}
-		} else if (LDRleft() < 0b00000011) {
+		} else if (LDRleft() < 0b01000001) {
 			StopEngines();
 			//Reverse(dutyc_b, counterValue_PWM);
 			Turn(1, dutyc_f, counterValue_PWM);
-		} else if (LDRright() < 0b00000011) {
+		} else if (LDRright() < 0b01000001) {
 			StopEngines();
 			//Reverse(dutyc_b, counterValue_PWM);
 			Turn(0, dutyc_f, counterValue_PWM);
-		}*/
+		}
 		
-		//for(i = 0; i < 2000; i++);
+		for(i = 0; i < 2000; i++);
 	}
 }
