@@ -26,22 +26,12 @@ static int prescaler = 8;
 static int counterValue_PWM = 255;
 
 static char baseX = 0;
-static char ongoingX = 0;
-static char ongoingY = 0;
 
 static float dutyc_f = 0.5;
 static float dutyc_b = 0.5;
 
 //Which side is the bot starting on?
 const int side = 0;
-
-//General Purpose Function
-void Delay(int time) {
-	int i,j;
-	for(j = 0;  j < time;  j++){
-		for(i = 0; i < 5000; i++);
-	}
-}
 
 
 //##################################################################################
@@ -403,29 +393,28 @@ char FindSlope(char axis) {
 //Checks Status of the X or Y acceleration
 void CheckStop(void) {
 	char xh, yh;
+	int i;
 
 	xh = ReadRequest(OUT_X_H);
 
 	yh = ReadRequest(OUT_Y_H);
+	
+	if (((xh & 0b10000000 && !(xh & 0b11000000)) || ReadRequest(0x31) & 0b00001010)) {
 
-	if (xh < ongoingX - 15) {
-		Reverse(dutyc_b, counterValue_PWM);
-		if (yh < 0) {
-			Turn(0, dutyc_f, counterValue_PWM);
+		for(i = 0; i < 1000; i++) {
+			Reverse(dutyc_b,counterValue_PWM);
 		}
-		else {
-			Turn(1, dutyc_f, counterValue_PWM);
-		}
-	}
 
-	if (yh < ongoingY - 15 || yh > ongoingY + 15) {
-		Reverse(dutyc_b, counterValue_PWM);
-		if (yh < 0) {
-			Turn(0, dutyc_f, counterValue_PWM);
+		if(yh & 0b11110000) {
+			for(i = 0; i < 5000; i++) {
+				Turn(1, dutyc_f, counterValue_PWM);
+			}
+		} else {
+			for(i = 0; i < 5000; i++) {
+				Turn(0, dutyc_f, counterValue_PWM);
+			}
 		}
-		else {
-			Turn(1, dutyc_f, counterValue_PWM);
-		}
+		StopEngines();
 	}
 }
 
@@ -433,34 +422,23 @@ void AccelerationRead() {
 	char status;
 
 	status = ReadRequest(STATUS_REG);
-	USART_Transmit(status);
 	
 	//If there is a difference in the acceleration of Y or X check if stopped/bumped
 	if (!((status & 0b00000011) == 0)) {
 		CheckStop();
 	}
 
-	//If Y returns a change, find the y slope
-	if (!((status & 0b00000010) == 0)) {
-		ongoingY = FindSlope('y');
+	if(ReadRequest(OUT_Y_H) & 0b11110000 && ReadRequest(OUT_X_H) & 0b11110000) {
+		StopEngines();
+		while(ReadRequest(OUT_Y_H) & 0b11110000) {
+			Turn(1, dutyc_f, counterValue_PWM);
+		}
 	}
-
-	//If X returns a change find the X slope and the direction in Y we need to change
-	if (!((status & 0b00000001) == 0)) {
-		ongoingX = FindSlope('x');
-		//Is X negative?
-		if ((ongoingX & 0b10000000) == 0 && ongoingX > 0b00000000) {
-			//Is Y negative? turn right
-			if ((ongoingY & 0b10000000) != 0) {
-				Turn(1, dutyc_f, counterValue_PWM);
-			}
-			//Is X negative turn left
-			else {
-				Turn(0, dutyc_f, counterValue_PWM);
-			}
-			//Is X going downhill?
-		} else if (ongoingX < 0b0000000) {
-			Turn(side, dutyc_f, counterValue_PWM);
+		
+	if(ReadRequest(OUT_Y_H) & 0b01010000 && ReadRequest(OUT_X_H) & 0b11110000) {
+		StopEngines();
+		while(ReadRequest(OUT_Y_H) & 0b01010000) {
+			Turn(0, dutyc_f,counterValue_PWM);
 		}
 	}
 }
@@ -472,59 +450,28 @@ void AccelerationRead() {
 //Reads what the light values are at the moment, if they are below/above certain thresholds reverse/turn, else drive
 
 
-/*
 
-ADMUX = (1<<REFS0)|(1<<ADLAR);				// init analog V_cc with capacitor at AREF-Pin
-ADCSRA= (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1);	// enable A/D-converter
-
-
-ADMUX |= (1<<MUX1);							// ADC2 active
-
-PORTD |= (1<<PC2);							// light right
-PORTD |= (1<<PC3);							// light left
-
-
-
-int LightRead(void) {
-
-	unsigned char zw=0;
-	ADCSRA = ADCSRA | (1<<ADSC);
-
-	while((ADCSRA & (1<<ADSC)))				// wait for converter end
-	{
-
-	}
-	zw=ADCH;
-
-
-	if(zw>7)
-	{
-		Drive(1,1);
-		char_ASCII(zw);
-	}
-
-
-	if(zw<=7)
-	{
-		Reverse(1,1);
-		long back=5000000;
-		while(back>=0)
-		{
-			back--;
-		}
-
-		Turn(0,1,0);
-		long wert=1000000;
-		while(wert>=0)
-		{
-			wert--;
-		}
-		else
-
+char LDRleft(void)
+{	ADMUX = (1<<REFS0)|(1<<ADLAR)|(1<<MUX1);	// init analog V_cc with capacitor at AREF-Pin & ADC2 active
+	ADCSRA= (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADSC);	// enable A/D-converter
+	PORTD |= (1<<PC3);	// light left
+	
+	while((ADCSRA & (1<<ADSC)))	{	}	// wait for converter end
+	
+	USART_Transmit(ADCL);
+	return ADCH;
 }
 
-*/
-
+char LDRright(void)
+{	ADMUX = (1<<REFS0)|(1<<ADLAR)|(1<<MUX1);	// init analog V_cc with capacitor at AREF-Pin & ADC2 active
+	ADCSRA= (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADSC);	// enable A/D-converter
+	PORTD |= (1<<PC2);	// light right
+	
+	while((ADCSRA & (1<<ADSC)))	{	}	// wait for converter end
+	
+	USART_Transmit(ADCL);
+	return ADCH;
+}
 
 //##################################################################################
 //################################ Main ############################################
@@ -537,10 +484,11 @@ int main(void)
 
 	DDRD &= ~(1<<PD0);
 	DDRD |= (1<<PD1);
+	
+	DDRC |= (1<<PC1);
+	PORTC |= (1<<PC1);
 
 	USART_Init (103);
-	unsigned char test_value='A';
-
 
 	initPWM(prescaler,counterValue_PWM);
 
@@ -557,22 +505,40 @@ int main(void)
 	WriteRequest(0x30, 0b11001010);
 	
 	baseX = FindSlope('x');
-	USART_Transmit(baseX);
+	int i;
 
 	while (1)
 	{
 		//######################## Example Drive ###################################
 
 		
-		Drive(dutyc_f,counterValue_PWM);
+		//Drive(dutyc_f,counterValue_PWM);
 
-		//LightRead();
+		//AccelerationRead();
 
-		AccelerationRead();
 
-		//USART_Transmit(test_value);
+		USART_Transmit('L');
+		USART_Transmit(LDRleft());
+		USART_Transmit('R');
+		USART_Transmit(LDRright());
 
-		//for(volatile long t=100000;t>0;t--);
-
+		/*if(LDRleft() < 0b0000001 && LDRright() < 0b00000001) {
+			for(i = 0; i < 5000; i++) {
+				Drive(dutyc_f, counterValue_PWM);
+			}
+			while(1) {
+				StopEngines();
+			}
+		} else if (LDRleft() < 0b00000011) {
+			StopEngines();
+			//Reverse(dutyc_b, counterValue_PWM);
+			Turn(1, dutyc_f, counterValue_PWM);
+		} else if (LDRright() < 0b00000011) {
+			StopEngines();
+			//Reverse(dutyc_b, counterValue_PWM);
+			Turn(0, dutyc_f, counterValue_PWM);
+		}*/
+		
+		//for(i = 0; i < 2000; i++);
 	}
 }
