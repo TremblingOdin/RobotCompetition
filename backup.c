@@ -400,7 +400,7 @@ void CheckStop(void) {
 
 	yh = ReadRequest(OUT_Y_H);
 	
-	if (((xh & 0b10000000 && !(xh & 0b11000000))|| !(xh & 0b00000111) || ReadRequest(0x31) & 0b00001010)) {
+	if (xh & 0b11000000 || !(xh & 0b11100000)) {
 
 		for(i = 0; i < 2000; i++) {
 			Reverse(dutyc_b,counterValue_PWM);
@@ -410,15 +410,15 @@ void CheckStop(void) {
 			for(i = 0; i < 3000; i++) {
 				Turn(1, dutyc_f, counterValue_PWM);
 			}
-			} else if (yh >0b11100000 && direction == 'R') {
+		} else if (yh >0b11100000 && direction == 'R') {
 			for(i = 0; i < 3000; i++) {
 				Turn(0, dutyc_f, counterValue_PWM);
 			}
-			} else if(yh < 0b11100000 && direction == 'L') {
+		} else if(yh < 0b11100000 && direction == 'L') {
 			for(i = 0; i < 3000; i++) {
 				Turn(0, dutyc_f, counterValue_PWM);
 			}
-			} else if (yh < 0b11100000 && direction == 'R') {
+		} else if (yh < 0b11100000 && direction == 'R') {
 			for(i = 0; i < 3000; i++) {
 				Turn(1, dutyc_f, counterValue_PWM);
 			}
@@ -427,6 +427,7 @@ void CheckStop(void) {
 		StopEngines();
 	}
 }
+
 void AccelerationRead() {
 	char status;
 
@@ -552,9 +553,9 @@ int main(void)
 	baseX = FindSlope('x');
 	int i;
 
-	while(word !='B') {
-		word = Recive();
-	}
+	//while(word !='B') {
+		//word = Recive();
+	//}
 	
 	DDRB |= (1<<PB0);
 	PORTB |= (1<<PB0);
