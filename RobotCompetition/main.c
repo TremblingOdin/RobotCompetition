@@ -393,32 +393,34 @@ char FindSlope(char axis) {
 
 //Checks Status of the X or Y acceleration
 void CheckStop(void) {
-	char xh, yh;
+	signed char xh, yh;
 	int i;
 
 	xh = ReadRequest(OUT_X_H);
 
 	yh = ReadRequest(OUT_Y_H);
 	
-	if (((xh & 0b10000000 && !(xh & 0b11000000))|| !(xh & 0b00000111) || ReadRequest(0x31) & 0b00001010)) {
+	if ((xh > 0b11100000 && xh < 0b00000111) || ReadRequest(0x31) & 0b00001010) {
 
-		for(i = 0; i < 2000; i++) {
+		for(i = 0; i < 4000; i++) {
 			Reverse(dutyc_b,counterValue_PWM);
 		}
+		
+		StopEngines();
 		
 		if(yh > 0b11100000 && direction == 'L') {
 			for(i = 0; i < 3000; i++) {
 				Turn(1, dutyc_f, counterValue_PWM);
 			}
-			} else if (yh >0b11100000 && direction == 'R') {
+		} else if (yh > 0b11100000 && direction == 'R') {
 			for(i = 0; i < 3000; i++) {
 				Turn(0, dutyc_f, counterValue_PWM);
 			}
-			} else if(yh < 0b11100000 && direction == 'L') {
+		} else if(yh < 0b11100000 && direction == 'L') {
 			for(i = 0; i < 3000; i++) {
 				Turn(0, dutyc_f, counterValue_PWM);
 			}
-			} else if (yh < 0b11100000 && direction == 'R') {
+		} else if (yh < 0b11100000 && direction == 'R') {
 			for(i = 0; i < 3000; i++) {
 				Turn(1, dutyc_f, counterValue_PWM);
 			}
@@ -430,7 +432,7 @@ void CheckStop(void) {
 void AccelerationRead() {
 	char status;
 
-	if((ReadRequest(OUT_Y_H) & 0b11110000) && !(ReadRequest(OUT_Y_H) & 0b01010000)) {
+	if((ReadRequest(OUT_Y_H) & 0b10100000)) {
 		direction = 'R';
 	} else {
 		direction = 'L';
@@ -496,24 +498,6 @@ unsigned char Wandeln(char pin){
 	
 }
 
-char LDRleft(void)
-{	ADMUX = (1<<REFS0)|(1<<ADLAR)|(1<<MUX0)|(1<<MUX1);	// init analog V_cc with capacitor at AREF-Pin & ADC2 active
-	ADCSRA= (1<<ADEN)|(1<<ADPS1)|(1<<ADPS2)|(1<<ADSC);	// enable A/D-converter
-	
-	while((ADCSRA & (1<<ADSC)))	{	}	// wait for converter end
-	
-	return ADCL;
-}
-
-char LDRright(void)
-{	ADMUX = (1<<REFS0)|(1<<ADLAR)|(1<<MUX1);	// init analog V_cc with capacitor at AREF-Pin & ADC2 active
-	ADCSRA= (1<<ADEN)|(1<<ADPS1)|(1<<ADPS2)|(1<<ADSC);	// enable A/D-converter
-		
-	while((ADCSRA & (1<<ADSC)))	{	}	// wait for converter end
-	
-	return ADCL;
-}
-
 //##################################################################################
 //################################ Main ############################################
 //##################################################################################
@@ -560,7 +544,7 @@ int main(void)
 	PORTB |= (1<<PB0);
 
 	//Get it off the black starting tape to not immediately reverse
-	for(i = 0; i <  1000; i++) {
+	for(i = 0; i < 4000; i++) {
 		Drive(dutyc_f, counterValue_PWM);
 		Wandeln(3);
 		Wandeln(2);
@@ -569,15 +553,10 @@ int main(void)
 	while (1)
 	{
 		//######################## Example Drive ###################################
-
-		for(i = 0; i < 1000; i++) {
-			Drive(dutyc_f,counterValue_PWM);
-		}
-		
 		AccelerationRead();
 
 		if(Wandeln(3) < 0b00000011 && Wandeln(2) < 0b00000011) {
-			for(i = 0; i < 5000; i++) {
+			for(i = 0; i < 1000; i++) {
 				Drive(dutyc_f, counterValue_PWM);
 			}
 			
@@ -592,21 +571,25 @@ int main(void)
 					PORTB |= (1<<PB0);
 				}
 			}
-		} else if (Wandeln(2) < 0b000000010 || Wandeln(3) < 0b00000010) {
-			for(i = 0; i < 3000; i++){
+		} else if (Wandeln(2) < 0b000000011 || Wandeln(3) < 0b00000011) {
+			for(i = 0; i < 5000; i++){
 				Reverse(dutyc_b, counterValue_PWM);
 			}
 	
 			StopEngines();
 			
-			if(direction == 'R') {
+			if(Wandeln(3) < 0b00000011) {
 				for(i = 0; i < 3000; i++){
 					Turn(0, dutyc_f, counterValue_PWM);
 				}
-			} else if(direction == 'L') {
+			} else if(Wandeln(2) < 0b00000011) {
 				for(i = 0; i < 3000; i++){
 					Turn(1, dutyc_f, counterValue_PWM);
 				}
+			}
+		} else {
+			for(i = 0; i < 500; i++) {
+				Drive(dutyc_f,counterValue_PWM);
 			}
 		}
 
